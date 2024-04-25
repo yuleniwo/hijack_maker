@@ -19,8 +19,6 @@ static const char* src1 = "#include <windows.h>\n"
 "\n"
 "typedef void (__stdcall *libfunc_t)(void);\n"
 "\n"
-"static HMODULE hdll;\n"
-"\n"
 "#define API_MAP(XX) \\\n";
 
 static const char* src2 = "#define GEN_VAR(API) static libfunc_t lf ## API = NULL;\n"
@@ -33,31 +31,57 @@ static const char* src2 = "#define GEN_VAR(API) static libfunc_t lf ## API = NUL
 "API_MAP(GEN_FUNC)\n"
 "#undef GEN_FUNC\n"
 "\n"
-"int load_api_addr()\n"
+"HMODULE load_dll(const char* file)\n"
 "{\n"
-"	char path[MAX_PATH];\n"
+"	char path[32768], buf[MAX_PATH];\n"
+"	DWORD dw;\n"
+"	HMODULE ret = NULL;\n"
 "\n"
-"	GetSystemDirectoryA(path, MAX_PATH);\n"
-"	lstrcatA(path, \"\\\\%s\");\n" // placeholder
-"	hdll = LoadLibraryA(path);\n"
+"	dw = GetSystemDirectoryA(path, sizeof(path));\n"
+"	path[dw++] = ';';\n"
 "\n"
-"	if(NULL == hdll)\n"
-"		return -1;\n"
+"	dw += GetWindowsDirectoryA(path + dw, sizeof(path) - dw);\n"
+"	path[dw++] = ';';\n"
 "\n"
-"#define GET_API(API) lf ## API = (libfunc_t)GetProcAddress(hdll, (LPCSTR)#API);\n"
+"	GetEnvironmentVariableA(\"PATH\", path + dw, sizeof(path) - dw);\n"
+"\n"
+"	dw = SearchPathA(path, file, \".dll\", sizeof(buf), buf, NULL);\n"
+"	if(dw > 0 && dw < (DWORD)sizeof(buf))\n"
+"		ret = LoadLibraryA(buf);\n"
+"\n"
+"	return ret;\n"
+"}\n"
+"\n"
+"void load_api_addr(HMODULE h)\n"
+"{\n"
+"#define GET_API(API) lf ## API = (libfunc_t)GetProcAddress(h, (LPCSTR)#API);\n"
 "	API_MAP(GET_API)\n"
 "#undef GET_API\n"
+"}\n"
 "\n"
-"	return 0;\n"
+"void hook()\n"
+"{\n"
+"	\n"
 "}\n"
 "\n"
 "BOOL WINAPI DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved)\n"
 "{\n"
+"	static HMODULE hdll;\n"
+"	static const char* file = \"%s\";\n" /* placeholder: dll_file */
 "	switch (dwReason)\n"
 "	{\n"
 "	case DLL_PROCESS_ATTACH:\n"
 "		//DisableThreadLibraryCalls(hModule);\n"
-"		load_api_addr();\n"
+"		hdll = load_dll(file);\n"
+"		if(NULL == hdll)\n"
+"		{\n"
+"			char msg[256];\n"
+"			wsprintfA(msg, \"Can not load file '%%s'!\", file);\n"
+"			MessageBoxA(NULL, msg, \"Load error\", MB_ICONERROR);\n"
+"			return FALSE;\n"
+"		}\n"
+"		load_api_addr(hdll);\n"
+"		hook();\n"
 "		return TRUE;\n"
 "\n"
 "	case DLL_PROCESS_DETACH:\n"
@@ -71,31 +95,31 @@ static const char* src2 = "#define GEN_VAR(API) static libfunc_t lf ## API = NUL
 static const char* vcproj = 
 "<?xml version=\"1.0\" encoding=\"gb2312\"?>\n"
 "<VisualStudioProject ProjectType=\"Visual C++\" Version=\"8.00\" Keyword=\"Win32Proj\"\n"
-"	Name=\"%s\" RootNamespace=\"%s\">\n" /* placehoder: proj proj */
+"	Name=\"%s\" RootNamespace=\"%s\">\n" /* placeholder: proj proj */
 "	<Platforms><Platform Name=\"Win32\"/><Platform Name=\"x64\"/></Platforms>\n"
 "	<Configurations>\n"
-"		<Configuration Name=\"Release|Win32\" OutputDirectory=\"$(SolutionDir)$(ConfigurationName)\"\n"
-"			IntermediateDirectory=\"$(ConfigurationName)\" ConfigurationType=\"2\" CharacterSet=\"1\"\n"
+"		<Configuration Name=\"Release|Win32\" OutputDirectory=\"$(SolutionDir)vc\\$(ProjectName)_$(PlatformName)_$(ConfigurationName)\"\n"
+"			IntermediateDirectory=\"$(OutDir)\" ConfigurationType=\"2\" CharacterSet=\"1\"\n"
 "			WholeProgramOptimization=\"1\">\n"
 "			<Tool Name=\"VCCLCompilerTool\" RuntimeLibrary=\"0\" UsePrecompiledHeader=\"0\" WarningLevel=\"3\"\n"
 "				PreprocessorDefinitions=\"WIN32;NDEBUG;_WINDOWS;_USRDLL;_WIN32_WINNT=0x0500\"\n"
 "				Detect64BitPortabilityProblems=\"true\" DebugInformationFormat=\"3\"/>\n"
-"			<Tool Name=\"VCLinkerTool\" LinkIncremental=\"1\" TargetMachine=\"1\" ModuleDefinitionFile=\"%s\"\n" /* placehoder: def_file */
+"			<Tool Name=\"VCLinkerTool\" LinkIncremental=\"1\" TargetMachine=\"1\" ModuleDefinitionFile=\"%s\"\n" /* placeholder: def_file */
 "				GenerateDebugInformation=\"true\" SubSystem=\"2\" OptimizeReferences=\"2\" EnableCOMDATFolding=\"2\"/>\n"
 "		</Configuration>\n"
-"		<Configuration Name=\"Release|x64\" OutputDirectory=\"$(SolutionDir)$(PlatformName)\\$(ConfigurationName)\"\n"
-"			IntermediateDirectory=\"$(PlatformName)\\$(ConfigurationName)\" ConfigurationType=\"2\"\n"
+"		<Configuration Name=\"Release|x64\" OutputDirectory=\"$(SolutionDir)vc\\$(ProjectName)_$(PlatformName)_$(ConfigurationName)\"\n"
+"			IntermediateDirectory=\"$(OutDir)\" ConfigurationType=\"2\"\n"
 "			CharacterSet=\"1\" WholeProgramOptimization=\"1\">\n"
 "			<Tool Name=\"VCCLCompilerTool\" PreprocessorDefinitions=\"WIN32;NDEBUG;_WINDOWS;_USRDLL;_WIN32_WINNT=0x0500\"\n"
 "				RuntimeLibrary=\"0\" UsePrecompiledHeader=\"0\" WarningLevel=\"3\" Detect64BitPortabilityProblems=\"true\"\n"
 "				DebugInformationFormat=\"3\"/>\n"
-"			<Tool Name=\"VCLinkerTool\" LinkIncremental=\"1\" SubSystem=\"2\" ModuleDefinitionFile=\"%s\"\n" /* placehoder: def_file */
+"			<Tool Name=\"VCLinkerTool\" LinkIncremental=\"1\" SubSystem=\"2\" ModuleDefinitionFile=\"%s\"\n" /* placeholder: def_file */
 "				GenerateDebugInformation=\"true\" OptimizeReferences=\"2\" EnableCOMDATFolding=\"2\" TargetMachine=\"17\"/>\n"
 "		</Configuration>\n"
 "	</Configurations>\n"
 "	<Files>\n"
 "		<Filter Name=\"src\" Filter=\"cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx\">\n"
-"			<File RelativePath=\".\\%s\"></File>\n" /* placehoder: c_file */
+"			<File RelativePath=\".\\%s\"></File>\n" /* placeholder: c_file */
 "		</Filter>\n"
 "	</Files>\n"
 "</VisualStudioProject>";
@@ -106,9 +130,9 @@ static const char* mingw_mk =
 "CC			:= gcc\n"
 "LD			:= $(CC)\n"
 "BITS		:= 32\n"
-"PROJNAME	:= %s\n" /* placehoder: proj */
+"PROJNAME	:= %s\n" /* placeholder: proj */
 "TOP_DIR		:= $(PWD)\n"
-"DEF_FILE	:= ./%s\n" /* placehoder: def_file */
+"DEF_FILE	:= ./%s\n" /* placeholder: def_file */
 "CFLAGS		:= -D NDEBUG -Wall -O2 -Wno-unused -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64\n"
 "LDFLAGS		:= -static-libgcc -Wl,--enable-stdcall-fixup\n"
 "\n"
@@ -125,7 +149,7 @@ static const char* mingw_mk =
 "BIN_DIR	:= $(TOP_DIR)/mingw/$(PROJNAME)_bin$(BITS)\n"
 "LIBOUT	:= $(BIN_DIR)/$(PROJNAME).dll\n"
 "\n"
-"C_SRCS		:= %s\n" /* placehoder: c_file */
+"C_SRCS		:= %s\n" /* placeholder: c_file */
 "C_OBJS		:= $(C_SRCS:%%.c=$(OBJ_DIR)/%%.o)\n"
 "C_DEPS		:= $(C_OBJS:%%.o=%%.d)\n"
 "\n"
@@ -631,14 +655,13 @@ lbl_end:
 
 int main(int argc, char **argv)
 {
-	const char* file = NULL;
-	const char* c_file = NULL;
-	const char* def_file = NULL;
-	const char* vcproj_file = NULL;
-	const char* make_file = NULL;
+	const char *file = NULL, *c_file = NULL, *def_file = NULL;
+	const char *vcproj_file = NULL, *make_file = NULL;
 	FILE* fp;
 	exp_tab_t et;
 	int i, j;
+	char buf[MAX_PATH];
+	DWORD dw;
 	struct
 	{
 		char ch;
@@ -688,6 +711,7 @@ int main(int argc, char **argv)
 	fp = fopen(file, "rb");
 	if(fp != NULL)
 	{
+lbl_retry:
 		if(ana_exp_tab(fp, &et) == 0)
 		{
 			int i;
@@ -707,9 +731,24 @@ int main(int argc, char **argv)
 			}
 			gen(&et, file, c_file, def_file, vcproj_file, make_file);
 		}
-		fclose(fp);
+	}
+	else if(file[0] != '\0' && file[1] != ':')
+	{
+		dw = SearchPathA(NULL, file, ".dll", (DWORD)sizeof(buf), buf, NULL);
+		if(dw > 0 && dw < MAX_PATH)
+		{
+			file = buf;
+			fp = fopen(file, "rb");
+			if(fp != NULL)
+				goto lbl_retry;
+		}
 	}
 	exp_tab_uninit(&et);
+
+	if(fp != NULL)
+		fclose(fp);
+	else
+		printf("Can not open file: %s\n", file);
 
 	return 0;
 }
